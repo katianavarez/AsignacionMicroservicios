@@ -1,0 +1,10 @@
+# RabbitMQ para el demo de Routing
+#   docker compose up -d
+# Consola web: http://localhost:15672  (usuario: guest, contraseña: guest)
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq-routing
+    ports:
+      - "5672:5672"     # AMQP (lo usan MSOrdenes y RoutingRabbitMQ)
+      - "15672:15672"   # consola de administración

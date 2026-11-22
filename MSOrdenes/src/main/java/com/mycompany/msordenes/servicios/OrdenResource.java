@@ -2,6 +2,7 @@ package com.mycompany.msordenes.servicios;
 
 import com.mycompany.msordenes.entidades.Orden;
 import com.mycompany.msordenes.entidades.Producto;
+import com.mycompany.msordenes.mensajeria.PublicadorLogs;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.Consumes;
@@ -29,6 +30,10 @@ public class OrdenResource {
     @RestClient
     ProductoServiceClient productClient;
 
+    /** Productor del paradigma Routing (publica en el exchange direct "direct_logs"). */
+    @Inject
+    PublicadorLogs logs;
+
     @GET
     public List<Orden> getAll() {
         return Orden.listAll();
@@ -48,6 +53,9 @@ public class OrdenResource {
     @Transactional
     public Response createOrder(List<Long> productIds) {
         if (productIds == null || productIds.size() != 3) {
+            int recibidos = productIds == null ? 0 : productIds.size();
+            // ROUTING KEY "warning": error del cliente, la orden no se crea
+            logs.warning("Orden rechazada: se recibieron " + recibidos + " productos (deben ser 3)");
             return Response.status(Response.Status.BAD_REQUEST)
                            .entity("La orden debe tener 3 productos")
                            .build();
@@ -59,8 +67,15 @@ public class OrdenResource {
                 Producto product = productClient.getById(id);
                 total += product.price;
             } catch (WebApplicationException e) {
+                logs.warning("Orden rechazada: no existe el producto " + id);
                 return Response.status(Response.Status.NOT_FOUND)
                                .entity("No existe el producto " + id)
+                               .build();
+            } catch (RuntimeException e) {
+                // MSProductos apagado o inaccesible -> ROUTING KEY "error"
+                logs.error("MSProductos no responde: no se pudo crear la orden " + productIds);
+                return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                               .entity("El servicio de productos no está disponible")
                                .build();
             }
         }
@@ -69,6 +84,9 @@ public class OrdenResource {
         orden.productos = productIds;
         orden.total = total;
         orden.persist();
+
+        // ROUTING KEY "info": todo salió bien
+        logs.info(String.format("Orden #%d creada con productos %s, total $%.2f", orden.id, productIds, total));
 
         return Response.status(Response.Status.CREATED).entity(orden).build();
     }

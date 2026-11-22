@@ -46,6 +46,12 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-jdbc-mysql</artifactId>
         </dependency>
+        <!-- Routing: cliente oficial de RabbitMQ (AMQP 0-9-1) para publicar en el exchange direct -->
+        <dependency>
+            <groupId>com.rabbitmq</groupId>
+            <artifactId>amqp-client</artifactId>
+            <version>5.24.0</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

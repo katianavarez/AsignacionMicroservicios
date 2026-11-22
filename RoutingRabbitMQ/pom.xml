@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.mycompany</groupId>
+    <artifactId>RoutingRabbitMQ</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <name>RoutingRabbitMQ</name>
+    <description>Demo del paradigma Routing (direct exchange) de RabbitMQ: emisor y receptores</description>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <amqp-client.version>5.24.0</amqp-client.version>
+        <slf4j.version>2.0.16</slf4j.version>
+    </properties>
+
+    <dependencies>
+        <!-- Cliente oficial de RabbitMQ para Java (protocolo AMQP 0-9-1, el del tutorial) -->
+        <dependency>
+            <groupId>com.rabbitmq</groupId>
+            <artifactId>amqp-client</artifactId>
+            <version>${amqp-client.version}</version>
+        </dependency>
+        <!-- Logging que usa internamente amqp-client (evita advertencias de SLF4J en consola) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <!--
+              Atajos para el demo (cada uno en su propia terminal):
+                mvn compile exec:java@monitor     -> recibe info, warning y error
+                mvn compile exec:java@auditoria   -> recibe warning y error (y los guarda en auditoria.log)
+                mvn compile exec:java@alertas     -> recibe solo error
+                mvn compile exec:java@emisor      -> emisor interactivo: escribe "severidad mensaje"
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>com.mycompany.routing.ReceptorLogsDirect</mainClass>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>monitor</id>
+                        <configuration>
+                            <mainClass>com.mycompany.routing.ReceptorLogsDirect</mainClass>
+                            <arguments>
+                                <argument>monitor</argument>
+                                <argument>info</argument>
+                                <argument>warning</argument>
+                                <argument>error</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>auditoria</id>
+                        <configuration>
+                            <mainClass>com.mycompany.routing.ReceptorLogsDirect</mainClass>
+                            <arguments>
+                                <argument>auditoria</argument>
+                                <argument>warning</argument>
+                                <argument>error</argument>
+                                <argument>--archivo=auditoria.log</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>alertas</id>
+                        <configuration>
+                            <mainClass>com.mycompany.routing.ReceptorLogsDirect</mainClass>
+                            <arguments>
+                                <argument>alertas</argument>
+                                <argument>error</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>emisor</id>
+                        <configuration>
+                            <mainClass>com.mycompany.routing.EmisorLogsDirect</mainClass>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

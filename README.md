@@ -15,6 +15,9 @@ implementando la persistencia con Panache y separando los 2 microservicios en pr
 **Asignación 2:** tomar el resultado anterior y configurarlo para el uso de un **API Gateway**.
 Se eligió implementar el gateway con **Quarkus** (proyecto `MSGateway`).
 
+**Asignación 3 (Equipo 3):** exposición del paradigma de mensajería **Routing** de RabbitMQ, con demo
+integrado a este sistema → ver [Paradigma Routing con RabbitMQ](#paradigma-routing-con-rabbitmq).
+
 ## Arquitectura
 
 ```
@@ -115,3 +118,104 @@ curl http://localhost:8080/api/ordenes
 | Orden con un número de productos distinto de 3 | 400    |
 | Orden con un producto que no existe      | 404    |
 | Microservicio apagado o inaccesible      | 503    |
+
+---
+
+## Paradigma Routing con RabbitMQ
+
+Basado en el tutorial oficial [Routing (Java)](https://www.rabbitmq.com/tutorials/tutorial-four-java).
+En Publish/Subscribe un exchange `fanout` manda **todos** los mensajes a **todas** las colas. Con Routing
+cada consumidor recibe **solo los mensajes que le interesan**: el productor etiqueta cada mensaje con una
+**routing key** y un exchange de tipo **`direct`** lo entrega únicamente a las colas cuyo **binding key**
+es **exactamente igual**.
+
+### Cómo lo aplicamos a este sistema
+
+`MSOrdenes` publica un evento cada vez que alguien intenta crear una orden, usando la **severidad** como
+routing key. Tres receptores se suscriben a distintas severidades:
+
+```
+                                         exchange "direct_logs" (direct)
+ Cliente ─► MSGateway ─► MSOrdenes ───►  ┌──────────────────────────────┐
+                        (productor)      │  info ─────────────────────► cola_monitor   ─► Monitor   (ve todo)
+                                         │  warning ──┬───────────────► cola_monitor
+                                         │            └───────────────► cola_auditoria ─► Auditoría (guarda en archivo)
+                                         │  error ────┬───────────────► cola_monitor
+                                         │            ├───────────────► cola_auditoria
+                                         │            └───────────────► cola_alertas   ─► Alertas   (solo errores)
+                                         │  debug ──► ✗ ninguna cola coincide → descartado
+                                         └──────────────────────────────┘
+```
+
+| Evento en `MSOrdenes`                                  | HTTP | Routing key | Monitor | Auditoría | Alertas |
+|--------------------------------------------------------|------|-------------|:-------:|:---------:|:-------:|
+| Orden creada                                           | 201  | `info`      | ✓       |           |         |
+| Orden con un número de productos distinto de 3         | 400  | `warning`   | ✓       | ✓         |         |
+| Orden con un producto que no existe                    | 404  | `warning`   | ✓       | ✓         |         |
+| `MSProductos` apagado (no se puede calcular el total)  | 503  | `error`     | ✓       | ✓         | ✓       |
+| Mensaje manual con `debug` (nadie hizo binding)        | —    | `debug`     |         |           |         |
+
+### Elementos del paradigma en el código
+
+| Elemento | Dónde | Qué hace |
+|----------|-------|----------|
+| **Productor** | `MSOrdenes/.../mensajeria/PublicadorLogs.java`, `RoutingRabbitMQ/.../EmisorLogsDirect.java` | Publica con `basicPublish(exchange, routingKey, props, body)` |
+| **Exchange `direct`** | `exchangeDeclare("direct_logs", BuiltinExchangeType.DIRECT)` | Compara routing key == binding key; si nadie coincide, descarta |
+| **Routing key** | 2º parámetro de `basicPublish` | Etiqueta del mensaje: `info`, `warning`, `error` |
+| **Cola** | `queueDeclare("cola_<nombre>", false, true, true, null)` | Buzón propio de cada consumidor (exclusiva, se borra al desconectarse) |
+| **Binding / binding key** | `queueBind(cola, "direct_logs", severidad)` | "Esta cola quiere los mensajes con esta key" (puede haber varios por cola) |
+| **Consumidor** | `RoutingRabbitMQ/.../ReceptorLogsDirect.java` | `basicConsume` + `DeliverCallback` procesa cada mensaje |
+
+### Requisitos adicionales
+
+- RabbitMQ en `localhost:5672`. Lo más fácil es Docker (desde la raíz del repo):
+
+  ```bash
+  docker compose up -d
+  ```
+
+  Consola web: <http://localhost:15672> (usuario `guest`, contraseña `guest`).
+  Sin Docker: instalar RabbitMQ (requiere Erlang) desde <https://www.rabbitmq.com/docs/download>.
+- Si RabbitMQ está en otra máquina: cambiar `rabbitmq.host` en
+  `MSOrdenes/src/main/resources/application.properties` y, para los receptores, usar la variable de entorno
+  `RABBITMQ_HOST` (o `-Drabbitmq.host=IP`).
+
+### Demo paso a paso
+
+1. **RabbitMQ:** `docker compose up -d`
+2. **Receptores** (cada uno en su terminal, dentro de `RoutingRabbitMQ/`):
+
+   ```bash
+   mvn -q compile exec:java@monitor      # binding keys: info, warning, error
+   mvn -q compile exec:java@auditoria    # binding keys: warning, error  (también escribe auditoria.log)
+   mvn -q compile exec:java@alertas      # binding key:  error
+   ```
+
+   En la consola web → *Exchanges* → `direct_logs` → *Bindings* se ven las 6 bindings.
+3. **Microservicios:** levantar `MSProductos`, `MSOrdenes` y `MSGateway` como siempre (`mvn quarkus:dev`).
+4. **Generar eventos reales** a través del gateway:
+
+   ```bash
+   # info    -> solo Monitor
+   curl -X POST http://localhost:8080/api/ordenes -H "Content-Type: application/json" -d '[1,2,3]'
+   # warning -> Monitor y Auditoría
+   curl -X POST http://localhost:8080/api/ordenes -H "Content-Type: application/json" -d '[1,2]'
+   curl -X POST http://localhost:8080/api/ordenes -H "Content-Type: application/json" -d '[1,2,99]'
+   # error   -> Monitor, Auditoría y Alertas  (primero apagar MSProductos con Ctrl+C)
+   curl -X POST http://localhost:8080/api/ordenes -H "Content-Type: application/json" -d '[1,2,3]'
+   ```
+
+   > En PowerShell usar `curl.exe` y escapar el JSON, o usar Postman.
+
+5. **Emisor manual** (opcional, no necesita los microservicios ni MySQL — sirve de respaldo para el demo):
+
+   ```bash
+   cd RoutingRabbitMQ
+   mvn -q compile exec:java@emisor
+   > info Orden #10 creada
+   > error Se cayó la base de datos
+   > debug nadie escucha esta key        # -> el exchange lo descarta
+   ```
+
+Si `MSOrdenes` no encuentra RabbitMQ, las órdenes **se siguen creando** normalmente; solo muestra una
+advertencia en su consola.
